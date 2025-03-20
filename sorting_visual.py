@@ -1,12 +1,200 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import random
 import time
+import json
+import csv
 
 # ----------------------------
 # Instrumented Sorting Algorithms with Highlighting
 # ----------------------------
 
+# ... [SORTING ALGORITHMS REMAIN UNCHANGED] ...
+
+# ----------------------------
+# Enhanced UI with Additional Features
+# ----------------------------
+
+class SortingVisualizer:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Sorting Visualizer")
+        self.root.attributes("-fullscreen", True)
+        self.dark_theme = False
+
+        # Menu Bar
+        menubar = tk.Menu(self.root)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Open Array", command=self.load_array)
+        file_menu.add_command(label="Save Array", command=self.save_array)
+        file_menu.add_command(label="Export CSV", command=self.export_csv)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        menubar.add_cascade(label="File", menu=file_menu)
+
+        view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_command(label="Toggle Dark Theme", command=self.toggle_theme)
+        menubar.add_cascade(label="View", menu=view_menu)
+
+        self.root.config(menu=menubar)
+
+        # Styling
+        self.set_theme()
+
+        self.canvas_bg = "#00FFAF"
+        self.bar_color = "#D0FF00"
+        self.highlight_color = "#FF0050"
+
+        self.array = []
+        self.working_array = []
+        self.history = []
+        self.generator = None
+        self.start_time = 0
+        self.after_id = None
+        self.animation_speed = 50
+        self.comparison_count = 0
+        self.swap_count = 0
+        self.highlight_indices = []
+        self.paused = False
+
+        main_frame = ttk.Frame(root, padding="10")
+        main_frame.grid(row=0, column=0, sticky="nsew")
+        root.grid_rowconfigure(0, weight=1)
+        root.grid_columnconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(0, weight=1)
+
+        # Header
+        header_frame = ttk.Frame(main_frame)
+        header_frame.grid(row=0, column=0, sticky="ew", pady=(0,15))
+        header_frame.grid_columnconfigure(0, weight=1)
+        title_label = ttk.Label(header_frame, text="Sorting Visualizer", style="Title.TLabel")
+        title_label.grid(row=0, column=0, sticky="w")
+        info_btn = ttk.Button(header_frame, text="ⓘ", width=3, command=self.show_info)
+        info_btn.grid(row=0, column=1, sticky="e")
+
+        # Controls Panel
+        control_frame = ttk.Frame(main_frame)
+        control_frame.grid(row=1, column=0, sticky="ew", pady=(0,15))
+        for i in range(3):
+            control_frame.grid_columnconfigure(i, weight=1, uniform="col")
+
+        ttk.Label(control_frame, text="Array Size:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.size_entry = ttk.Entry(control_frame, width=8)
+        self.size_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        self.size_entry.insert(0, "50")
+
+        gen_btn = ttk.Button(control_frame, text="Generate Array", command=self.generate_array)
+        gen_btn.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+
+        ttk.Label(control_frame, text="Algorithm:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.sort_var = tk.StringVar()
+        algo_combo = ttk.Combobox(control_frame, textvariable=self.sort_var,
+                                  values=["Quick Sort", "Quick Sort Optimised",
+                                          "Merge Sort", "Merge Sort Optimised",
+                                          "Heap Sort", "Heap Sort Optimised",
+                                          "Tim Sort", "Tim Sort Optimised"])
+        algo_combo.grid(row=1, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+        algo_combo.current(0)
+
+        ttk.Label(control_frame, text="Speed:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        self.speed_var = tk.IntVar(value=50)
+        speed_scale = ttk.Scale(control_frame, from_=1, to=100, variable=self.speed_var,
+                                orient="horizontal", command=self.update_speed)
+        speed_scale.grid(row=2, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+
+        btn_frame = ttk.Frame(control_frame)
+        btn_frame.grid(row=3, column=0, columnspan=3, pady=(10,0), sticky="ew")
+        for i in range(4):
+            btn_frame.grid_columnconfigure(i, weight=1)
+
+        start_btn = ttk.Button(btn_frame, text="Start", command=self.start_sorting)
+        start_btn.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        pause_btn = ttk.Button(btn_frame, text="Pause/Resume", command=self.toggle_pause)
+        pause_btn.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
+        step_btn = ttk.Button(btn_frame, text="Step", command=self.step_sort)
+        step_btn.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
+        back_btn = ttk.Button(btn_frame, text="Back", command=self.back_step)
+        back_btn.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
+
+        reset_btn = ttk.Button(control_frame, text="Reset", command=self.reset_array)
+        reset_btn.grid(row=4, column=0, columnspan=3, padx=5, pady=5, sticky="ew")
+
+        # Canvas
+        self.canvas = tk.Canvas(main_frame, bg=self.canvas_bg, height=400)
+        self.canvas.grid(row=2, column=0, sticky="nsew")
+
+        # Statistics Label
+        self.stats_label = ttk.Label(main_frame, text="Comparisons: 0 | Swaps: 0 | Time: 0.00s")
+        self.stats_label.grid(row=3, column=0, pady=10)
+
+    def show_info(self):
+        messagebox.showinfo("About", "Sorting Visualizer with export/import feature\nSupports Dark Theme, Step-by-Step, and Back functionality.")
+
+    def toggle_theme(self):
+        self.dark_theme = not self.dark_theme
+        self.set_theme()
+
+    def set_theme(self):
+        if self.dark_theme:
+            bg = "#222222"
+            fg = "#FFFFFF"
+        else:
+            bg = "#E0E0E0"
+            fg = "#333333"
+
+        self.root.configure(bg=bg)
+        self.style = ttk.Style()
+        self.style.theme_use("clam")
+        self.style.configure("TFrame", background=bg)
+        self.style.configure("TLabel", background=bg, foreground=fg, font=("Segoe UI", 11))
+        self.style.configure("Title.TLabel", font=("Segoe UI", 24, "bold"), foreground=fg, underline=True)
+        self.style.configure("TButton", font=("Segoe UI", 10), padding=6, background="#B0B0B0", foreground=fg)
+        self.style.configure("TCombobox", font=("Segoe UI", 10), fieldbackground="#B0B0B0", background="#B0B0B0", foreground=fg)
+        self.style.map("TButton", background=[("active", "#909090")])
+
+    def generate_array(self):
+        size = int(self.size_entry.get())
+        self.array = [random.randint(1, 100) for _ in range(size)]
+        self.reset_array()
+
+    def reset_array(self):
+        self.working_array = self.array.copy()
+        self.history = []
+        self.comparison_count = 0
+        self.swap_count = 0
+        self.start_time = 0
+        self.update_canvas()
+        self.update_stats(0)
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+
+    def update_speed(self, e=None):
+        self.animation_speed = 101 - self.speed_var.get()
+
+    def start_sorting(self):
+        # Define algorithm generator mappings here
+        pass
+
+    def step_sort(self):
+        # Step-by-step mode logic
+        pass
+
+    def back_step(self):
+        if self.history:
+            self.working_array = self.history.pop()
+            self.update_canvas()
+
+    def export_csv(self):
+        if not self.working_array:
+            messagebox.showerror("Error", "No array to export.")
+            return
+        file = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
+        if file:
+            with open(file, "w", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(self.working_array)
+            messagebox.showinfo("Success", "Array exported as CSV!")
 def quick_sort_gen(array):
     def _quick_sort(arr, low, high):
         if low < high:
@@ -294,9 +482,9 @@ class SortingVisualizer:
         self.style.map("TButton", background=[("active", "#909090")])
 
         # Colors for canvas and bars
-        self.canvas_bg = "#E0E0E0"
-        self.bar_color = "#00bfff"
-        self.highlight_color = "#ff4500"
+        self.canvas_bg = "#00FFAF"
+        self.bar_color = "#D0FF00"
+        self.highlight_color = "#FF0050"
 
         self.array = []
         self.working_array = []
